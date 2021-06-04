@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh" xmlns:th="http://www.thymeleaf.org">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>订单详情</title>
+    <link rel="stylesheet" th:href="@{/css/table.css}">
+    <link rel="stylesheet" th:href="@{/css/button.css}">
+    <link rel="stylesheet" th:href="@{/css/prompt.css}">
+    <style>
+        .subject {
+            margin-top: 20px;
+            font-size: 36px;
+            text-align: center;
+        }
+
+        tbody tr:nth-of-type(n) {
+            background-color: aliceblue;
+        }
+
+        tbody tr:hover {
+            background-image: none;
+        }
+
+        thead th:last-of-type {
+            width: 510px;
+        }
+    </style>
+</head>
+
+<body>
+<h1 class="subject">订单详情</h1>
+<table class="list_table">
+    <thead>
+    <tr>
+        <th>商品</th>
+        <th>付款金额</th>
+        <th>操作</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+        <td th:text="${orderInfo.getGoodName()}">--</td>
+        <td th:text="${orderInfo.getDeal()}">--</td>
+        <td>
+            <div th:if="${orderInfo.getOrder().getStatus()} == '0'">
+                订单已完成
+            </div>
+            <div th:if="${orderInfo.getOrder().getStatus()} == '1'">
+                <button class="pay">立即支付</button>
+                <button class="later">稍后支付</button>
+                <button class="cancel">取消购买</button>
+            </div>
+
+        </td>
+    </tr>
+    </tbody>
+</table>
+<div class="prompt">
+    支付成功
+</div>
+<!-- 遮盖层 -->
+<div id="bg" class="bg"></div>
+</body>
+<script type="text/javascript" th:src="@{/js/jquery.js}"></script>
+<script th:inline="javascript">
+    const pay = document.querySelector(".pay");
+    const later = document.querySelector(".later");
+    const cancel = document.querySelector(".cancel");
+    if (pay !== null) {
+        pay.addEventListener("click", function () {
+            $.post({
+                url: "/pay",
+                data: {
+                    "goodId": [[ ${orderInfo.getOrder().getGoodId()}]],
+                    "phone": [[ ${orderInfo.getOrder().getPhone()}]]
+                },
+                success: function (res) {
+                    if (res) {
+                        alert("付款成功")
+                        let parent = pay.parentNode
+                        parent.innerText = "订单已完成"
+                        for (let i = 0; i < parent.children.length; i++) {
+                            parent.children[i].style.display = 'none'
+                        }
+                        window.setTimeout(function () {
+                            window.location.href = "/list"
+                        }, 5000)
+                    } else {
+                        window.location.href = "/404"
+                    }
+                }
+            })
+        })
+    }
+
+    if (later !== null) {
+        later.addEventListener("click", function () {
+            $.ajax({
+                url: "/later/" + [[ ${orderInfo.getOrder().getPhone()}]],
+                success: function () {
+                    window.location.href = "/list"
+                }
+            })
+        })
+    }
+
+    if (cancel !== null) {
+        cancel.addEventListener("click", function () {
+            $.post({
+                url: "/cancel",
+                data: {
+                    "goodId": [[ ${orderInfo.getOrder().getGoodId()}]],
+                    "phone": [[ ${orderInfo.getOrder().getPhone()}]]
+                },
+                success: function (res) {
+                    if (res) {
+                        alert("成功取消订单")
+                        window.location.href = "/list"
+                    } else {
+                        window.location.href = "/404"
+                    }
+                }
+            })
+        })
+    }
+
+</script>
+
+</html>

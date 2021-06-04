@@ -1,0 +1,52 @@
+* {
+    padding: 0;
+    margin: 0;
+}
+
+.lineStyle,
+table,
+thead td,
+tbody tr td {
+    padding: 10px;
+    border: 1px solid black;
+    vertical-align: middle;
+}
+
+table {
+    margin: 20px auto;
+    border-collapse: collapse;
+    text-align: center;
+}
+
+thead th {
+    font-size: 1.5em;
+    text-align: center;
+    width: 260px;
+    height: 60px;
+    font-weight: bold;
+    color: white;
+    background-color: rgba(43, 157, 233, 0.911);
+}
+
+thead th:last-of-type {
+    width: 360px;
+}
+
+tbody td:nth-of-type(6) {
+    width: 240px;
+}
+
+tbody tr:nth-of-type(2n-1) {
+    background-color: rgba(72, 226, 201, 0.815);
+}
+
+tbody tr:hover {
+    background-color: rgb(213, 153, 228);
+}
+
+tbody tr td {
+    font-size: 1.4em;
+    text-align: center;
+    width: 150px;
+    height: 50px;
+}

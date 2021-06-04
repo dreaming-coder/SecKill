@@ -1,0 +1,21 @@
+td button {
+    border: 0px;
+    margin: 10px;
+    float: right;
+    height: 40px;
+    width: 140px;
+    border-radius: 15px;
+    font-size: 1.1em;
+    color: white;
+    background-color: rgb(76, 108, 249);
+}
+
+td button:hover {
+    background-color: rgb(16, 52, 212);
+    cursor: pointer;
+}
+
+td button:active {
+    background-color: rgb(27, 235, 89);
+    box-shadow: 1px 1px 1px 1px rgb(18, 201, 73) inset;
+}

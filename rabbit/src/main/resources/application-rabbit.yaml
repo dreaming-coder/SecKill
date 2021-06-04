@@ -1,0 +1,14 @@
+spring:
+  rabbitmq:
+    host: 118.25.151.78
+    port: 5672
+    virtual-host: /seckill
+    username: seckill
+    password: seckill
+    listener: # 加了2下面2个属性,消费消息的时候,就必须发送ack确认,不然消息永远还在队列中
+      direct:
+        acknowledge-mode: manual
+      simple:
+        acknowledge-mode: manual
+
+

@@ -1,0 +1,5 @@
+spring:
+  profiles:
+    include: [ repository, redis, rabbit, service ]
+server:
+  port: 8080

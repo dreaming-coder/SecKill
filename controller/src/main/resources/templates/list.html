@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh" xmlns:th="http://www.thymeleaf.org">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>秒杀商品列表</title>
+    <link rel="stylesheet" href="css/table.css">
+    <link rel="stylesheet" href="css/button.css">
+    <link rel="stylesheet" href="css/countdown.css">
+    <link rel="stylesheet" href="css/popup.css">
+
+    <style>
+        .subject {
+            margin-top: 20px;
+            font-size: 36px;
+            text-align: center;
+        }
+
+        tbody td:nth-of-type(2) {
+            text-decoration: line-through;
+        }
+    </style>
+</head>
+
+<body>
+<h1 class="subject">秒杀商品列表</h1>
+<table class="list_table">
+    <thead>
+    <tr>
+        <th>商品</th>
+        <th>原价</th>
+        <th>秒杀价</th>
+        <th>库存</th>
+        <th>时间</th>
+        <th>操作</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr th:each="good : ${goodList}">
+        <td th:text="${good.goodName}"></td>
+        <td th:text="${good.originPrice}"></td>
+        <td th:text="${good.discountPrice}"></td>
+        <td th:text="${good.stock}" class="stock" th:attr="goodId=${good.goodId}"></td>
+        <td th:with="start=${good.startTime},end=${good.endTime}, now=${#temporals.createNow()}">
+            <section class="count-down" th:with="hour= ${T(java.time.Duration).between(now,start).toHours()},
+                        minute=${T(java.time.Duration).between(now,start).toMinutes() % 60},
+                        second=${T(java.time.Duration).between(now,start).toMillis() / 1000 % 60}">
+                <div class="time-area" th:if="${start.minusDays(1).isBefore(now) and start.isAfter(now)}">
+                    <p></p>
+                    <div class="hour" th:text="${hour < 10 ? '0' + hour : hour}">--</div>
+                    <div class="minute" th:text="${minute < 10 ? '0' + minute : minute}">--</div>
+                    <div class="second" th:text="${second < 10 ? '0' + second : second}">--</div>
+                </div>
+                <div class="time-area" th:if="${start.isBefore(now) and end.isAfter(now)}">
+                    <p>活动进行中</p>
+                    <div class="hour" style="display: none"></div>
+                    <div class="minute" style="display: none"></div>
+                    <div class="second" style="display: none"></div>
+                </div>
+                <div class="time-area" th:if="${end.isBefore(now)}">
+                    <p>活动已结束</p>
+                    <div class="hour" style="display: none"></div>
+                    <div class="minute" style="display: none"></div>
+                    <div class="second" style="display: none"></div>
+                </div>
+                <div class="time-area" th:if="${start.minusDays(1).isAfter(now)}">
+                    <p>活动尚未开始</p>
+                    <div class="hour" style="display: none"></div>
+                    <div class="minute" style="display: none"></div>
+                    <div class="second" style="display: none"></div>
+                </div>
+                <div style="display: none">
+                    <div th:text="${#temporals.format(start, 'yyyy-MM-dd HH:mm:ss')}"></div>
+                    <div th:text="${#temporals.format(end, 'yyyy-MM-dd HH:mm:ss')}"></div>
+                </div>
+            </section>
+        </td>
+        <td>
+            <button class="order" th:onclick="order([[${good.goodId}]],[[${good.goodName}]]);">订单</button>
+            <button class="pay" th:onclick="pay([[${good.goodId}]],[[${good.goodName}]]);" disabled>抢购</button>
+        </td>
+    </tr>
+    </tbody>
+</table>
+
+<div id="login" class="login">
+    <div id="title" class="login-title">
+        <div class="pop-title">订单查询</div>
+        <span><a id="closeBtn" href="javascript:void(0);" class="close-login">关闭</a></span>
+    </div>
+    <form class="login-input-content" id="info-form" method="post">
+        <input type="hidden" name="pathId" id="pathId">
+        <input type="hidden" name="goodId" id="goodId">
+        <div class="login-input">
+            <label>商品名称：</label>
+            <input type="text" id="commodity" name="commodity" class="list-input" readonly>
+        </div>
+        <div class="login-input">
+            <label>手机号码：</label>
+            <input type="tel" placeholder="请输入手机号码" name="phone" id="phone" class="list-input phone">
+        </div>
+        <div class="login-input mail">
+            <label>电子邮箱：</label>
+            <input type="email" placeholder="请输入电子邮箱" name="email" id="email" class="list-input email">
+        </div>
+    </form>
+    <div id="loginBtn" class="login-button">
+        <button type="submit" id="login-button-submit">查询</button>
+    </div>
+</div>
+<!-- 遮盖层 -->
+<div id="bg" class="login-bg"></div>
+</body>
+<script type="text/javascript" th:src="@{/js/jquery.js}"></script>
+<script type="text/javascript" th:src="@{/js/common.js}"></script>
+<script type="text/javascript" th:src="@{/js/stock.js}"></script>
+<script type="text/javascript" th:src="@{/js/countdown.js}"></script>
+<script type="text/javascript" th:src="@{/js/popup.js}"></script>
+
+</html>
