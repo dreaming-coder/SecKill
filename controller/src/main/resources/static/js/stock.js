@@ -4,7 +4,7 @@ const stocks = document.querySelectorAll(".stock");
 for (let i = 0; i < stocks.length; i++) {
     window.setInterval(function () {
         getStock(stocks[i])
-    }, 1000);
+    }, 500);
 }
 
 function getStock(stock) {

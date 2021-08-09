@@ -39,7 +39,7 @@ public class GoodService {
     // 商品库存查询
     public Long getStock(String goodId) {
         Long stock = stockService.getStock(goodId);
-        if (-1 == stock) {
+        if (-1L == stock) {
             QueryWrapper<Good> wrapper = new QueryWrapper<>();
             wrapper.select("stock").eq("good_id", goodId);
             stock = goodMapper.selectOne(wrapper).getStock();
