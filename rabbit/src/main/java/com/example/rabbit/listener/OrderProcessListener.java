@@ -77,7 +77,7 @@ public class OrderProcessListener {
                 }
             } else {
                 stockService.incrementStock(order.getGoodId());
-                if ("2".equals(order_new.getStatus())) {
+                if ("1".equals(order_new.getStatus())) {
                     rabbitTemplate.convertAndSend("order-event-exchange", "seckill.order.cancel", order);
                 }
                 channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);

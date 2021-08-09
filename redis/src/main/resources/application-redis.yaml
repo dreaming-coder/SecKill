@@ -1,7 +1,7 @@
 spring:
   redis:
-    host: 127.0.0.1                # Redis服务器地址
-    port: 6379                     # Redis服务器连接端口
+    host: 118.25.151.78                # Redis服务器地址
+    port: 16379                     # Redis服务器连接端口
     database: 0                    # Redis数据库索引（默认为0）
     timeout: 5000                  # 连接超时时间（毫秒）
     lettuce:

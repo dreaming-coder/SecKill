@@ -15,7 +15,7 @@ import javax.sql.DataSource;
 public class DruidConfiguration {
     @Bean
     @ConfigurationProperties(prefix = "spring.datasource") // 和配置文件中的属性绑定，避免重复写 setXXX()
-    public DataSource dataSourceOne(){
+    public DataSource dataSource(){
         return new DruidDataSource();
     }
 }
