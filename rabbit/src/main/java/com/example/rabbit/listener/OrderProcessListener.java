@@ -64,9 +64,7 @@ public class OrderProcessListener {
             QueryWrapper<Order> orderQueryWrapper = new QueryWrapper<>();
             orderQueryWrapper.eq("phone", order.getPhone()).eq("good_id", order.getGoodId())
                     .eq("order_id",order.getOrderId());
-//                    .orderByDesc("create_time").last("limit 1");
             Order order_new = orderMapper.selectOne(orderQueryWrapper);
-            System.out.println(order_new);
 
             if ("0".equals(order_new.getStatus())) {
                     UpdateWrapper<Good> wrapper = new UpdateWrapper<>();
