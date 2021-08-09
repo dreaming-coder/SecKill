@@ -63,18 +63,20 @@ public class OrderProcessListener {
         try {
             QueryWrapper<Order> orderQueryWrapper = new QueryWrapper<>();
             orderQueryWrapper.eq("phone", order.getPhone()).eq("good_id", order.getGoodId())
-                    .orderByDesc("create_time").last("limit 1");
+                    .eq("order_id",order.getOrderId());
+//                    .orderByDesc("create_time").last("limit 1");
             Order order_new = orderMapper.selectOne(orderQueryWrapper);
+            System.out.println(order_new);
 
             if ("0".equals(order_new.getStatus())) {
-                UpdateWrapper<Good> wrapper = new UpdateWrapper<>();
-                wrapper.eq("good_id", order_new.getGoodId()).gt("stock", 0);
-                int affectedRows = goodMapper.deliver(wrapper);
-                if (affectedRows > 0) {
-                    channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
-                } else {
-                    throw new RuntimeException();
-                }
+                    UpdateWrapper<Good> wrapper = new UpdateWrapper<>();
+                    wrapper.eq("good_id", order_new.getGoodId()).gt("stock", 0);
+                    int affectedRows = goodMapper.deliver(wrapper);
+                    if (affectedRows > 0) {
+                        channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
+                    } else {
+                        throw new RuntimeException();
+                    }
             } else {
                 stockService.incrementStock(order.getGoodId());
                 if ("1".equals(order_new.getStatus())) {
