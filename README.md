@@ -1,6 +1,11 @@
+
 秒杀系统相信很多人见过，比如京东或者淘宝的秒杀，小米手机的秒杀，那么秒杀系统的后台是如何实现的呢？我们如何设计一个秒杀系统呢？对于秒杀系统应该考虑哪些问题？如何设计出健壮的秒杀系统？
 
 当然，鉴于本人的菜鸡属性，目前的知识储备只够实现一个基于 SpringBoot + Mybatis-Plus + MySQL + Redis + RabbitMQ + Themleaf + HTML + CSS + JavaScript 的秒杀案例，因为主要考虑后端，前端界面会很简洁（就是很丑啦）。
+
+本文中的内容最终项目代码可能有出入，因为 bug 太多，调到后面记不过来了，一切以项目代码为准，亲测跑通 \^-\^
+
+项目地址：[https://github.com/dreaming-coder/SecKill](https://github.com/dreaming-coder/SecKill)
 
 # 1. 秒杀应该考虑哪些问题
 
@@ -118,7 +123,8 @@ public class TestRateLimiter {
 
 上面代码的思路就是通过 `RateLimiter` 来限定我们的令牌桶每秒产生 1 个令牌(生产的效率比较低)，循环 10 次去执行任务。`acquire() ` 会阻塞当前线程直到获取到令牌，也就是如果任务没有获取到令牌，会一直等待。那么请求就会卡在我们限定的时间内才可以继续往下走，这个方法返回的是线程具体等待的时间。执行如下：
 
-![](img/001.png)
+![在这里插入图片描述](https://img-blog.csdnimg.cn/20210604165126369.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2RyZWFtaW5nX2NvZGVy,size_16,color_FFFFFF,t_70#pic_center)
+
 
 可以看到任务执行的过程中，第 1 个是无需等待的，因为已经在开始的第 1 秒生产出了令牌。接下来的任务请求就必须等到令牌桶产生了令牌才可以继续往下执行。如果没有获取到就会阻塞(有一个停顿的过程)。不过这个方式不太好，因为用户如果在客户端请求，如果较多的话，直接后台在生产 token 就会卡顿(用户体验较差)，它是不会抛弃任务的，我们需要一个更优秀的策略：**如果超过某个时间没有获取到，直接拒绝该任务**。接下来再来个案例：
 
@@ -144,7 +150,8 @@ public class TestRateLimiter2 {
 
 其中用到了 `tryAcquire()` 方法，这个方法的主要作用是设定一个超时的时间，如果在指定的时间内**预估(注意是预估并不会真实的等待)，**如果能拿到令牌就返回 true，如果拿不到就返回 false。然后我们让无效的直接跳过，这里设定每秒生产 1 个令牌，让每个任务尝试在 0.5 秒获取令牌，如果获取不到，就直接跳过这个任务(放在秒杀环境里就是直接抛弃这个请求)；程序实际运行如下：
 
-![](img/002.png)
+![在这里插入图片描述](https://img-blog.csdnimg.cn/20210604165135423.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2RyZWFtaW5nX2NvZGVy,size_16,color_FFFFFF,t_70#pic_center)
+
 
 只有第 1 个获取到了令牌，顺利执行了，下面的基本都直接抛弃了，因为 0.5 秒内，令牌桶( 1 秒 1 个)来不及生产就肯定获取不到返回false了。
 
@@ -156,11 +163,1362 @@ public class TestRateLimiter2 {
 
 ## 2.7 整体流程图
 
-![](img/003.png)
+![在这里插入图片描述](https://img-blog.csdnimg.cn/20210604165144505.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2RyZWFtaW5nX2NvZGVy,size_16,color_FFFFFF,t_70#pic_center)
 
-## 2.8 基于 RabbitMQ 死信队列的订单超时取消流程
 
-![](img/004.png)
+# 3. web 界面设计
+
+个人觉得，前面数据库决定好了，下一步应该是前端静态界面了（我对前端真鸡儿恐惧，不会搞），数据库和前端界面（包括 JavaScript 之类的）确定了，后面剩下的不就是按照需求写 controller、service 和 repository 了吗？
+
+后台逻辑反而比前端设计简单多了！
+
+下面看看我们这个秒杀案例需要几张页面，注意，我们只是为了实现秒杀系统的整个流程，像登录、注册、管理等暂不考虑，只涉及能反映该秒杀功能的最少页面
+
+- 404
+
+- 秒杀商品列表（作为主页 index.html）
+
+  倒计时、抢购按钮、自动更新商品库存、抢购价格
+
+  订单查询按钮（根据 session，优先查询本地 session 的包含的用户的订单，没有则需要弹窗给出必要的查询信息）
+
+- 订单详情列表
+
+  下单商品、价格、取消/支付/稍后
+
+
+## 3.1 index.html
+
+示意图如下：
+
+![在这里插入图片描述](https://img-blog.csdnimg.cn/20210604165156656.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2RyZWFtaW5nX2NvZGVy,size_16,color_FFFFFF,t_70#pic_center)
+
+![在这里插入图片描述](https://img-blog.csdnimg.cn/20210604165204207.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2RyZWFtaW5nX2NvZGVy,size_16,color_FFFFFF,t_70#pic_center)
+
+
+## 3.2 order.html
+
+![在这里插入图片描述](https://img-blog.csdnimg.cn/20210604165213158.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2RyZWFtaW5nX2NvZGVy,size_16,color_FFFFFF,t_70#pic_center)
+![在这里插入图片描述](https://img-blog.csdnimg.cn/20210604165220287.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2RyZWFtaW5nX2NvZGVy,size_16,color_FFFFFF,t_70#pic_center)
+
+
+## 3.3 404.html
+
+![在这里插入图片描述](https://img-blog.csdnimg.cn/20210604165229801.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2RyZWFtaW5nX2NvZGVy,size_16,color_FFFFFF,t_70#pic_center)
+
+
+# 4. 后台系统实现
+
+此次想基于 IDEA 尝试使用多模块开发，大致分为 repository、service、controller、redis、rabbit 五个模块，首选创建项目工程：
+
+1、创建一个 Spring Initializer 项目
+
+![在这里插入图片描述](https://img-blog.csdnimg.cn/20210604165240746.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2RyZWFtaW5nX2NvZGVy,size_16,color_FFFFFF,t_70#pic_center)
+![在这里插入图片描述](https://img-blog.csdnimg.cn/20210604165247979.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2RyZWFtaW5nX2NvZGVy,size_16,color_FFFFFF,t_70#pic_center)
+
+
+删除多余内容，如下图所示：
+
+![在这里插入图片描述](https://img-blog.csdnimg.cn/2021060416525673.png#pic_center)
+
+
+2、创建子模块 repository
+
+![在这里插入图片描述](https://img-blog.csdnimg.cn/20210604165302950.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2RyZWFtaW5nX2NvZGVy,size_16,color_FFFFFF,t_70#pic_center)
+
+![在这里插入图片描述](https://img-blog.csdnimg.cn/20210604165309464.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2RyZWFtaW5nX2NvZGVy,size_16,color_FFFFFF,t_70#pic_center)
+
+![在这里插入图片描述](https://img-blog.csdnimg.cn/20210604165317727.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2RyZWFtaW5nX2NvZGVy,size_16,color_FFFFFF,t_70#pic_center)
+
+
+3、创建其他子模块
+
+![在这里插入图片描述](https://img-blog.csdnimg.cn/20210604165324234.png#pic_center)
+
+
+4、修改父工程 pom 文件
+
+![在这里插入图片描述](https://img-blog.csdnimg.cn/20210604165331191.png#pic_center)
+
+
+5、修改子模块 pom 文件
+
+5.1、修改 repository 的 pom 文件
+
+```xml
+<parent>
+    <groupId>com.example</groupId>
+    <artifactId>Seckill</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <relativePath/> <!-- lookup parent from repository -->
+</parent>
+```
+
+5.2、修改 service 的 pom 文件
+
+```xml
+<parent>
+    <groupId>com.example</groupId>
+    <artifactId>Seckill</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <relativePath/> <!-- lookup parent from repository -->
+</parent>
+<dependency>
+    <groupId>com.example</groupId>
+    <artifactId>repository</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+</dependency>
+```
+
+5.3、修改 controller 的 pom 文件
+
+```xml
+<parent>
+    <groupId>com.example</groupId>
+    <artifactId>Seckill</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <relativePath/> <!-- lookup parent from repository -->
+</parent>
+<dependency>
+    <groupId>com.example</groupId>
+    <artifactId>service</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+</dependency>
+```
+
+5.4、修改 rabbit 的 pom 文件
+
+```xml
+<parent>
+    <groupId>com.example</groupId>
+    <artifactId>Seckill</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <relativePath/> <!-- lookup parent from repository -->
+</parent>
+<dependency>
+    <groupId>com.example</groupId>
+    <artifactId>repository</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+</dependency>
+<dependency>
+    <groupId>com.example</groupId>
+    <artifactId>redis</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+</dependency>
+```
+
+5.5、修改 redis 的 pom 文件
+
+```xml
+<parent>
+    <groupId>com.example</groupId>
+    <artifactId>Seckill</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <relativePath/> <!-- lookup parent from repository -->
+</parent>
+```
+
+## 4.1 repository
+
+### 4.1.1 创建表
+
+```sql
+DROP TABLE IF EXISTS `sec_goods`;
+CREATE TABLE `sec_goods` (
+  `id` int NOT NULL AUTO_INCREMENT COMMENT 'id，主键，因为可能一个商品有多个活动',
+  `good_id` varchar(12) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '活动商品 id',
+  `origin_price` decimal(8,2) DEFAULT NULL COMMENT '原始价格',
+  `discount_price` decimal(8,2) DEFAULT NULL COMMENT '活动价格',
+  `stock` int DEFAULT NULL COMMENT '参与活动商品的库存',
+  `start_time` datetime DEFAULT NULL COMMENT '活动开始时间',
+  `end_time` datetime DEFAULT NULL COMMENT '活动结束时间',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=1000 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+DROP TABLE IF EXISTS `sec_orders`;
+CREATE TABLE `sec_orders` (
+  `order_id` varchar(18) COLLATE utf8mb4_general_ci NOT NULL COMMENT '订单id',
+  `phone` char(11) COLLATE utf8mb4_general_ci NOT NULL COMMENT '手机号',
+  `email` varchar(40) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '电子邮箱',
+  `good_id` varchar(12) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '活动商品 id',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '订单创建时间',
+  `status` char(1) NOT NULL COMMENT '订单状态：0表示完成，1表示待付款，2表示订单取消',
+  PRIMARY KEY (`order_id`),
+  UNIQUE KEY `phone` (`phone`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+```
+
+### 4.1.2 编写配置
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/seckill
+    username: root
+    password: root
+    type: com.zaxxer.hikari.HikariDataSource
+    driver-class-name: com.mysql.cj.jdbc.Driver
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+```
+
+```java
+package com.example.repository.config;
+
+import com.alibaba.druid.pool.DruidDataSource;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import javax.sql.DataSource;
+
+/**
+ * @author ice
+ * @create 2021-05-27 09:18:38
+ */
+@Configuration
+public class DruidConfig {
+    @Bean
+    @ConfigurationProperties(prefix = "spring.datasource") // 和配置文件中的属性绑定，避免重复写 setXXX()
+    public DataSource dataSourceOne(){
+        return new DruidDataSource();
+    }
+}
+```
+
+### 4.1.3 编写实体类
+
+```java
+package com.example.repository.entity;
+
+
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.datatype.jsr310.deser.LocalDateTimeDeserializer;
+import com.fasterxml.jackson.datatype.jsr310.ser.LocalDateTimeSerializer;
+import lombok.*;
+
+import java.io.Serializable;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
+/**
+ * @author ice
+ * @create 2021-05-26 22:00:44
+ */
+@Setter
+@Getter
+@ToString
+@NoArgsConstructor
+@AllArgsConstructor
+@TableName(value = "sec_goods")
+public class Good implements Serializable {
+    private static final long serialVersionUID = -8595790565352087597L;
+    @TableId(type = IdType.AUTO)
+    private Long id;
+    private String goodId;
+    private BigDecimal originPrice;
+    private BigDecimal discountPrice;
+    private Long stock;
+    @JsonDeserialize(using = LocalDateTimeDeserializer.class)
+    @JsonSerialize(using = LocalDateTimeSerializer.class)
+    private LocalDateTime  startTime;
+    @JsonDeserialize(using = LocalDateTimeDeserializer.class)
+    @JsonSerialize(using = LocalDateTimeSerializer.class)
+    private LocalDateTime endTime;
+}
+```
+
+```java
+package com.example.repository.entity;
+
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.datatype.jsr310.deser.LocalDateTimeDeserializer;
+import com.fasterxml.jackson.datatype.jsr310.ser.LocalDateTimeSerializer;
+import lombok.*;
+
+import java.io.Serializable;
+import java.time.LocalDateTime;
+
+/**
+ * @author ice
+ * @create 2021-05-26 22:00:52
+ */
+@Setter
+@Getter
+@ToString
+@NoArgsConstructor
+@AllArgsConstructor
+@TableName(value = "sec_orders")
+public class Order implements Serializable {
+    private static final long serialVersionUID = -1594951159465127479L;
+    @TableId(type = IdType.ASSIGN_UUID)
+    private String orderId;
+
+    private String phone;
+    private String email;
+    private String goodId;
+    @JsonDeserialize(using = LocalDateTimeDeserializer.class)
+    @JsonSerialize(using = LocalDateTimeSerializer.class)
+    private LocalDateTime createTime;
+    private String status;
+}
+```
+
+### 4.1.4 编写 Mapper 接口
+
+暂时先继承 `BaseMapper`，后序看情况再添加方法
+
+```java
+package com.example.repository.mapper;
+
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.baomidou.mybatisplus.core.toolkit.Constants;
+import com.example.repository.entity.Good;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Update;
+
+/**
+ * @author ice
+ * @create 2021-05-27 09:37:39
+ */
+@Mapper
+public interface GoodMapper extends BaseMapper<Good> {
+    @Update("update sec_goods set stock = stock - 1 ${ew.customSqlSegment}")
+    int deliver(@Param(Constants.WRAPPER) Wrapper<Good> wrapper);
+}
+```
+
+```java
+package com.example.repository.mapper;
+
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.example.repository.entity.Order;
+import org.apache.ibatis.annotations.Mapper;
+
+/**
+ * @author ice
+ * @create 2021-05-27 11:00:26
+ */
+@Mapper
+public interface OrderMapper extends BaseMapper<Order> {
+}
+```
+
+## 4.2 redis
+
+### 4.2.1 编写配置
+
+```yaml
+spring:
+  redis:
+    host: 127.0.0.1                # Redis服务器地址
+    port: 6379                     # Redis服务器连接端口
+    database: 0                    # Redis数据库索引（默认为0）
+    timeout: 5000                  # 连接超时时间（毫秒）
+    lettuce:
+      pool:
+        max-active: 20             # 接池最大连接数（使用负值表示没有限制）
+        max-wait: -1               # 最大阻塞等待时间(负数表示没限制)
+        max-idle: 5                # 连接池中的最大空闲连接
+        min-idle: 0                # 连接池中的最小空闲连接
+```
+
+```java
+package com.example.redis.config;
+
+import com.example.redis.service.LimitService;
+import com.example.redis.service.PathService;
+import com.example.redis.service.StockService;
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
+import com.fasterxml.jackson.annotation.PropertyAccessor;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.jsontype.impl.LaissezFaireSubTypeValidator;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.CachingConfigurerSupport;
+import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.DependsOn;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.redis.cache.RedisCacheConfiguration;
+import org.springframework.data.redis.cache.RedisCacheManager;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.RedisSerializationContext;
+import org.springframework.data.redis.serializer.RedisSerializer;
+import org.springframework.data.redis.serializer.StringRedisSerializer;
+import org.springframework.scripting.support.ResourceScriptSource;
+
+import java.time.Duration;
+
+/**
+ * @author ice
+ * @create 2021-05-27 20:55:27
+ */
+@SuppressWarnings({"rawtypes", "unchecked", "DuplicatedCode"})
+@Configuration
+@EnableCaching
+public class RedisConfig extends CachingConfigurerSupport {
+    @Bean
+    public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory factory) {
+        RedisTemplate<String, Object> template = new RedisTemplate<>();
+        RedisSerializer<String> redisSerializer = new StringRedisSerializer();
+        Jackson2JsonRedisSerializer jackson2JsonRedisSerializer = new Jackson2JsonRedisSerializer(Object.class);
+        ObjectMapper om = new ObjectMapper();
+        om.setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.ANY);
+        om.activateDefaultTyping(LaissezFaireSubTypeValidator.instance,ObjectMapper.DefaultTyping.NON_FINAL);
+        jackson2JsonRedisSerializer.setObjectMapper(om);
+        template.setConnectionFactory(factory);
+        //key序列化方式
+        template.setKeySerializer(redisSerializer);
+        //value序列化
+        template.setValueSerializer(jackson2JsonRedisSerializer);
+        //value hashmap序列化
+        template.setHashValueSerializer(jackson2JsonRedisSerializer);
+        return template;
+    }
+
+
+    @Bean
+    public CacheManager cacheManager(RedisConnectionFactory factory) {
+        RedisSerializer<String> redisSerializer = new StringRedisSerializer();
+        Jackson2JsonRedisSerializer jackson2JsonRedisSerializer = new Jackson2JsonRedisSerializer(Object.class);
+        //解决查询缓存转换异常的问题
+        ObjectMapper om = new ObjectMapper();
+        om.setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.ANY);
+        om.activateDefaultTyping(LaissezFaireSubTypeValidator.instance,ObjectMapper.DefaultTyping.NON_FINAL);
+        jackson2JsonRedisSerializer.setObjectMapper(om);
+        // 配置序列化（解决乱码的问题）,过期时间600秒
+        RedisCacheConfiguration config = RedisCacheConfiguration.defaultCacheConfig()
+                .entryTtl(Duration.ofSeconds(600))
+                .serializeKeysWith(RedisSerializationContext.SerializationPair.fromSerializer(redisSerializer))
+                .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(jackson2JsonRedisSerializer))
+                .disableCachingNullValues();
+        return RedisCacheManager.builder(factory)
+                .cacheDefaults(config)
+                .build();
+    }
+
+    @Bean
+    @DependsOn({"checkStockScript","redisTemplate"})
+    public StockService redisService(){
+        return new StockService();
+    }
+
+    @Bean
+    @DependsOn({"pathScript","redisTemplate"})
+    public PathService pathService(){
+        return new PathService();
+    }
+
+    @Bean
+    @DependsOn("redisTemplate")
+    public LimitService limitService(){
+        return new LimitService();
+    }
+
+    @Bean
+    public DefaultRedisScript<Boolean> checkStockScript(){
+        DefaultRedisScript<Boolean> script = new DefaultRedisScript<>();
+        script.setScriptSource(new ResourceScriptSource(new ClassPathResource("checkStock.lua")));
+        script.setResultType(Boolean.class);
+        return script;
+    }
+
+    @Bean
+    public DefaultRedisScript<Long> pathScript(){
+        DefaultRedisScript<Long> script = new DefaultRedisScript<>();
+        script.setScriptSource(new ResourceScriptSource(new ClassPathResource("dynamicPath.lua")));
+        script.setResultType(Long.class);
+        return script;
+    }
+
+}
+```
+
+### 4.2.2 编写 StockService
+
+用于获取库存，如还有则减一，需要保证原子性，利用 Lua 脚本执行
+
+```lua
+local stock = redis.call('get',KEYS[1])
+if tonumber(stock) > 0 then
+    redis.call('DECR', KEYS[1])
+    return true
+else
+    return false
+end
+```
+
+```java
+package com.example.redis.service;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * @author ice
+ * @blog https://blog.csdn.net/dreaming_coder
+ * @description
+ * @create 2021-05-29 18:39:57
+ */
+public class StockService {
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
+
+    @Autowired
+    private DefaultRedisScript<Boolean> script;
+
+    public void initStock(Map<String, Object> map) {
+        map.forEach(
+                (goodId, stock) -> {
+                    String key = goodId + ":stock";
+                    redisTemplate.opsForValue().set(key, stock);
+                }
+        );
+    }
+
+    public void decrementStock(String goodId) {
+        String key = goodId + ":stock";
+        redisTemplate.opsForValue().decrement(key, 1);
+    }
+
+    public void incrementStock(String goodId) {
+        String key = goodId + ":stock";
+        redisTemplate.opsForValue().increment(key, 1);
+    }
+
+    public Boolean checkStock(String goodId){
+        String key = goodId + ":stock";
+        List<String> keyList = new ArrayList<>();
+        keyList.add(key);
+        return redisTemplate.execute(script, keyList);
+    }
+}
+```
+
+### 4.2.3 编写 PathService
+
+用于动态获取 `pathId`，接口防刷，因为是先判断再获取，没有要创建的，也要原子性，所以也用 Lua 脚本执行
+
+```lua
+local function getRandom(n,seed)
+    math.randomseed(seed)
+    local t = {
+        "0","1","2","3","4","5","6","7","8","9"
+    }
+    local s = ""
+    for i =1, n do
+        s = s .. t[math.random(#t)]
+    end;
+    return s
+end;
+
+local path = redis.call('GET', KEYS[1])
+
+if not path then
+    path = tonumber(getRandom(8, ARGV[1]))
+    redis.call('SETEX',KEYS[1],60, path)
+    return path
+else
+    return tonumber(path)
+end
+```
+
+```java
+package com.example.redis.service;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * @author ice
+ * @blog https://blog.csdn.net/dreaming_coder
+ * @description
+ * @create 2021-05-29 20:01:38
+ */
+public class PathService {
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
+
+    @Autowired
+    private DefaultRedisScript<Long> script;
+
+    public Long getDynamicPath(String goodId){
+        String key = goodId + ":path";
+        List<String> keyList = new ArrayList<>();
+        keyList.add(key);
+        return redisTemplate.execute(script, keyList,randomSeed());
+    }
+
+    private static long randomSeed(){
+        long temp = System.currentTimeMillis();
+        long seed = 0L;
+        while (temp > 0) {
+            seed *= 10;
+            seed += temp % 10;
+            temp /= 10;
+        }
+        return seed % 100000000;
+    }
+}
+```
+
+### 4.2.4 编写 LimitService
+
+用来防止短时间内（10 s）相同用户重复请求
+
+```java
+package com.example.redis.service;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
+
+import java.time.Duration;
+
+/**
+ * @author ice
+ * @blog https://blog.csdn.net/dreaming_coder
+ * @description
+ * @create 2021-05-29 22:30:08
+ */
+public class LimitService {
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
+
+    public Boolean checkRepeatLimit(String goodId, String phone, String email) {
+        String key = goodId + ":" + phone;
+        return redisTemplate.opsForValue().setIfAbsent(key, email, Duration.ofSeconds(10));
+    }
+
+}
+```
+
+## 4.3 rabbit
+
+### 4.3.1 超时订单处理流程
+
+![在这里插入图片描述](https://img-blog.csdnimg.cn/20210604165347629.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2RyZWFtaW5nX2NvZGVy,size_16,color_FFFFFF,t_70#pic_center)
+
+
+### 4.3.1 编写配置
+
+新建用户 `seckill`，以及虚拟主机 `/seckill`
+
+```yaml
+spring:
+  rabbitmq:
+    host: 118.25.151.78
+    port: 5672
+    virtual-host: /seckill
+    username: seckill
+    password: seckill
+```
+
+### 4.3.2 编写配置类
+
+```java
+package com.example.rabbit.config;
+
+import org.springframework.amqp.core.Binding;
+import org.springframework.amqp.core.Exchange;
+import org.springframework.amqp.core.Queue;
+import org.springframework.amqp.core.TopicExchange;
+import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
+import org.springframework.amqp.support.converter.MessageConverter;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * @author ice
+ * @blog https://blog.csdn.net/dreaming_coder
+ * @description
+ * @create 2021-05-30 19:52:59
+ */
+@Configuration
+public class RabbitMQConfiguration {
+    @Bean
+    public MessageConverter jackson2JsonMessageConverter() {
+        return new Jackson2JsonMessageConverter();
+    }
+
+    // 定义交换机
+
+    @Bean
+    public Exchange orderEventExchange() {
+        return new TopicExchange("order-event-exchange", true, false);
+    }
+
+    // 死信队列
+
+    @Bean
+    public Queue seckillOrderDelayQueue() {
+        //死信队列的属性
+        Map<String, Object> arguments = new HashMap<>();
+        //指定order-event-exchange为死信交换机，消息过期后将会投到死信交换机
+        arguments.put("x-dead-letter-exchange", "order-event-exchange");
+        //指定死信的路由key
+        arguments.put("x-dead-letter-routing-key", "seckill.order.process");
+        //ttl time to live 消息存活时间，为了测试，设置为10s
+        arguments.put("x-message-ttl", 10000);
+        //队列名，是否持久，是否排他，是否自动删除
+        return new Queue("seckill.order.delay.queue", true, false, false, arguments);
+    }
+
+
+
+    @Bean
+    // 处理订单队列，根据订单表中订单状态决定库存释放还是减一入库
+    public Queue seckillOrderProcessQueue() {
+        return new Queue("seckill.order.process.queue", true, false, false);
+    }
+
+    @Bean
+    // 支付队列，修改订单状态为 0
+    public Queue seckillOrderPayQueue() {
+        return new Queue("seckill.order.pay.queue", true, false, false);
+    }
+
+    @Bean
+    // 支付队列，修改订单状态为 2
+    public Queue seckillOrderCancelQueue() {
+        return new Queue("seckill.order.cancel.queue", true, false, false);
+    }
+
+
+    // 绑定交换机和队列
+    @Bean
+    public Binding seckillOrderCreateBinding() {
+        return new Binding("seckill.order.delay.queue", Binding.DestinationType.QUEUE,
+                "order-event-exchange", "seckill.order.create", null);
+    }
+
+    @Bean
+    public Binding seckillOrderProcessBinding() {
+        return new Binding("seckill.order.process.queue", Binding.DestinationType.QUEUE,
+                "order-event-exchange", "seckill.order.process", null);
+    }
+    @Bean
+    public Binding seckillOrderPayBinding() {
+        return new Binding("seckill.order.pay.queue", Binding.DestinationType.QUEUE,
+                "order-event-exchange", "seckill.order.pay", null);
+    }
+
+    @Bean
+    public Binding seckillOrderCancelBinding() {
+        return new Binding("seckill.order.cancel.queue", Binding.DestinationType.QUEUE,
+                "order-event-exchange", "seckill.order.cancel", null);
+    }
+
+}
+```
+
+### 4.3.3 注册监听方法
+
+```java
+package com.example.rabbit.listener;
+
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.example.repository.entity.Order;
+import com.example.repository.mapper.OrderMapper;
+import com.rabbitmq.client.Channel;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.core.Message;
+import org.springframework.amqp.rabbit.annotation.RabbitHandler;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+
+/**
+ * @author ice
+ * @blog https://blog.csdn.net/dreaming_coder
+ * @description
+ * @create 2021-05-31 19:49:00
+ */
+
+@Component
+@Slf4j
+@RabbitListener(queues = "seckill.order.pay.queue")
+public class OrderPayListener {
+
+    private OrderMapper orderMapper;
+
+    @Autowired
+    public void setOrderMapper(OrderMapper orderMapper) {
+        this.orderMapper = orderMapper;
+    }
+
+    @RabbitHandler
+    public void consumer(Order order, Message message, Channel channel) {
+        // 根据传入的 order 中的 orderId 定位到确定的订单，将其状态修改为 0
+        try {
+            log.info("付款订单id：{}", order.getOrderId());
+            UpdateWrapper<Order> wrapper = new UpdateWrapper<>();
+            wrapper.eq("order_id", order.getOrderId()).eq("status", "1");
+            Order update = new Order();
+            update.setStatus("0");
+            int affectedRows = orderMapper.update(update, wrapper);
+            if (affectedRows > 0) {
+                channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
+            } else {
+                throw new RuntimeException();
+            }
+        } catch (IOException e) {
+            try {
+                channel.basicNack(message.getMessageProperties().getDeliveryTag(), false, false);
+            } catch (IOException ioException) {
+                ioException.printStackTrace();
+            }
+        } catch (RuntimeException runtimeException) {
+            log.error("付款失败");
+            try {
+                channel.basicReject(message.getMessageProperties().getDeliveryTag(), false);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+}
+```
+
+```java
+package com.example.rabbit.listener;
+
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.example.repository.entity.Order;
+import com.example.repository.mapper.OrderMapper;
+import com.rabbitmq.client.Channel;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.core.Message;
+import org.springframework.amqp.rabbit.annotation.RabbitHandler;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+
+/**
+ * @author ice
+ * @blog https://blog.csdn.net/dreaming_coder
+ * @description
+ * @create 2021-05-31 19:54:34
+ */
+@Component
+@Slf4j
+@RabbitListener(queues = "seckill.order.cancel.queue")
+public class OrderCancelListener {
+
+    private OrderMapper orderMapper;
+
+    @Autowired
+    public void setOrderMapper(OrderMapper orderMapper) {
+        this.orderMapper = orderMapper;
+    }
+
+    @RabbitHandler
+    public void consumer(Order order, Message message, Channel channel) {
+        // 根据传入的 order 中的 orderId 定位到确定的订单，将其状态修改为 2
+        try {
+            log.info("取消订单id：{}", order.getOrderId());
+            UpdateWrapper<Order> wrapper = new UpdateWrapper<>();
+            wrapper.eq("order_id", order.getOrderId()).eq("status", "1");
+            Order update = new Order();
+            update.setStatus("2");
+            int affectedRows = orderMapper.update(update, wrapper);
+            if (affectedRows > 0) {
+                channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
+            } else {
+                throw new RuntimeException();
+            }
+        } catch (IOException e) {
+            try {
+                channel.basicNack(message.getMessageProperties().getDeliveryTag(), false, false);
+            } catch (IOException ioException) {
+                ioException.printStackTrace();
+            }
+        } catch (RuntimeException runtimeException) {
+            log.error("取消订单失败");
+            try {
+                channel.basicReject(message.getMessageProperties().getDeliveryTag(),false);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+}
+```
+
+```java
+package com.example.rabbit.listener;
+
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.example.redis.service.StockService;
+import com.example.repository.entity.Good;
+import com.example.repository.entity.Order;
+import com.example.repository.mapper.GoodMapper;
+import com.rabbitmq.client.Channel;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.core.Message;
+import org.springframework.amqp.rabbit.annotation.RabbitHandler;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+
+/**
+ * @author ice
+ * @blog https://blog.csdn.net/dreaming_coder
+ * @description
+ * @create 2021-05-31 19:51:18
+ */
+@Component
+@Slf4j
+@RabbitListener(queues = "seckill.order.process.queue")
+public class OrderProcessListener {
+
+    private GoodMapper goodMapper;
+
+    private StockService stockService;
+
+    @Autowired
+    public void setGoodMapper(GoodMapper goodMapper) {
+        this.goodMapper = goodMapper;
+    }
+
+    @Autowired
+    public void setStockService(StockService stockService) {
+        this.stockService = stockService;
+    }
+
+    @RabbitHandler
+    public void consumer(Order order, Message message, Channel channel) {
+        try {
+            String status = order.getStatus();
+            if ("0".equals(status)) {
+                UpdateWrapper<Good> wrapper = new UpdateWrapper<>();
+                wrapper.eq("good_id",order.getGoodId()).gt("stock",0);
+                int affectedRows = goodMapper.deliver(wrapper);
+                if (affectedRows > 0) {
+                    channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
+                } else {
+                    throw new RuntimeException();
+                }
+            } else {
+                stockService.incrementStock(order.getGoodId());
+                channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
+            }
+        } catch (IOException e) {
+            try {
+                channel.basicNack(message.getMessageProperties().getDeliveryTag(), false, false);
+            } catch (IOException ioException) {
+                ioException.printStackTrace();
+            }
+        }catch (RuntimeException runtimeException) {
+            log.error("商品出库失败");
+            try {
+                channel.basicReject(message.getMessageProperties().getDeliveryTag(),false);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+}
+```
+
+## 4.5 service
+
+### 4.5.1 编写配置
+
+```java
+package com.example.service.config;
+
+import com.google.common.util.concurrent.RateLimiter;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+/**
+ * @author ice
+ * @blog https://blog.csdn.net/dreaming_coder
+ * @description
+ * @create 2021-06-01 21:38:15
+ */
+@Configuration
+public class ServiceConfiguration {
+
+    @Bean
+    @SuppressWarnings("UnstableApiUsage")
+    public RateLimiter rateLimiter(){
+        return RateLimiter.create(10);
+    }
+}
+```
+
+### 4.5.2 编写数据传输类
+
+```java
+package com.example.service.pojo;
+
+import com.example.repository.entity.Order;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import lombok.ToString;
+
+import java.math.BigDecimal;
+
+/**
+ * @author ice
+ * @blog https://blog.csdn.net/dreaming_coder
+ * @description
+ * @create 2021-06-01 20:12:27
+ */
+@Data
+@AllArgsConstructor
+@NoArgsConstructor
+@ToString
+public class OrderInfoDTO {
+    private Order order;
+    private String goodName;
+    private BigDecimal deal;
+}
+```
+
+### 4.5.3 编写返回值类型枚举类
+
+```java
+package com.example.service.type;
+
+/**
+ * @author ice
+ * @blog https://blog.csdn.net/dreaming_coder
+ * @description
+ * @create 2021-06-01 21:21:37
+ */
+public enum ReturnType {
+    Success,
+    TimeLimitError,
+    PurchaseLimitError,
+    StockOutError,
+    SeckillFailError
+}
+```
+
+### 4.5.4 编写 GoodService
+
+```java
+package com.example.service.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.example.redis.service.StockService;
+import com.example.repository.entity.Good;
+import com.example.repository.mapper.GoodMapper;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+
+/**
+ * @author ice
+ * @blog https://blog.csdn.net/dreaming_coder
+ * @description
+ * @create 2021-06-01 18:09:35
+ */
+@Service
+public class GoodService {
+
+    private GoodMapper goodMapper;
+    private StockService stockService;
+
+    @Autowired
+    public void setGoodMapper(GoodMapper goodMapper) {
+        this.goodMapper = goodMapper;
+    }
+
+    @Autowired
+    public void setStockService(StockService stockService) {
+        this.stockService = stockService;
+    }
+
+    // 商品页面展示
+    public List<Good> goodList() {
+        return goodMapper.selectList(null);
+    }
+
+    // 商品库存查询
+    public Long getStock(String goodId) {
+        Long stock = stockService.getStock(goodId);
+        if (-1 == stock) {
+            QueryWrapper<Good> wrapper = new QueryWrapper<>();
+            wrapper.select("stock").eq("good_id", goodId);
+            stock = goodMapper.selectOne(wrapper).getStock();
+        }
+        return stock;
+    }
+
+
+```
+
+### 4.5.5 编写 OrderService
+
+```java
+package com.example.service.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.example.repository.entity.Good;
+import com.example.repository.entity.Order;
+import com.example.repository.mapper.GoodMapper;
+import com.example.repository.mapper.OrderMapper;
+import com.example.service.pojo.OrderInfoDTO;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+/**
+ * @author ice
+ * @blog https://blog.csdn.net/dreaming_coder
+ * @description
+ * @create 2021-06-01 18:11:08
+ */
+@Service
+public class OrderService {
+
+    private GoodMapper goodMapper;
+
+    private OrderMapper orderMapper;
+
+    @Autowired
+    public void setGoodMapper(GoodMapper goodMapper) {
+        this.goodMapper = goodMapper;
+    }
+
+    @Autowired
+    public void setOrderMapper(OrderMapper orderMapper) {
+        this.orderMapper = orderMapper;
+    }
+
+    // 查询订单的信息，在订单详情展示
+    public OrderInfoDTO queryOrderInfo(String goodId, String phone) {
+        QueryWrapper<Order> orderQueryWrapper = new QueryWrapper<>();
+        orderQueryWrapper.eq("phone", phone).eq("good_id", goodId).ne("status", "2");
+        Order order = orderMapper.selectOne(orderQueryWrapper);
+        QueryWrapper<Good> goodQueryWrapper = new QueryWrapper<>();
+        goodQueryWrapper.eq("good_id", goodId);
+        Good good = goodMapper.selectOne(goodQueryWrapper);
+        return new OrderInfoDTO(order, good.getGoodName(), good.getDiscountPrice());
+    }
+}
+```
+
+### 4.5.6 编写 PayService
+
+```java
+package com.example.service.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.example.repository.entity.Order;
+import com.example.repository.mapper.OrderMapper;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+/**
+ * @author ice
+ * @blog https://blog.csdn.net/dreaming_coder
+ * @description
+ * @create 2021-06-01 20:55:32
+ */
+@Service
+public class PayService {
+    private RabbitTemplate rabbitTemplate;
+    private OrderMapper orderMapper;
+
+    @Autowired
+    public void setRabbitTemplate(RabbitTemplate rabbitTemplate) {
+        this.rabbitTemplate = rabbitTemplate;
+    }
+
+    @Autowired
+    public void setOrderMapper(OrderMapper orderMapper) {
+        this.orderMapper = orderMapper;
+    }
+
+    public void pay(String goodId, String phone) {
+        QueryWrapper<Order> orderQueryWrapper = new QueryWrapper<>();
+        orderQueryWrapper.eq("phone", phone).eq("good_id", goodId).eq("status", "1");
+        Order order = orderMapper.selectOne(orderQueryWrapper);
+        rabbitTemplate.convertAndSend("order-event-exchange", "seckill.order.pay", order);
+    }
+
+    public void later(String goodId, String phone) {
+
+    }
+
+    public void cancel(String goodId, String phone) {
+        QueryWrapper<Order> orderQueryWrapper = new QueryWrapper<>();
+        orderQueryWrapper.eq("phone", phone).eq("good_id", goodId).eq("status", "1");
+        Order order = orderMapper.selectOne(orderQueryWrapper);
+        rabbitTemplate.convertAndSend("order-event-exchange", "seckill.order.cancel", order);
+    }
+}
+```
+
+### 4.5.7 编写 SecKillService
+
+```java
+package com.example.service.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.example.redis.service.LimitService;
+import com.example.redis.service.StockService;
+import com.example.repository.entity.Good;
+import com.example.repository.entity.Order;
+import com.example.repository.mapper.GoodMapper;
+import com.example.repository.mapper.OrderMapper;
+import com.example.service.type.ReturnType;
+import com.google.common.util.concurrent.RateLimiter;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+
+/**
+ * @author ice
+ * @blog https://blog.csdn.net/dreaming_coder
+ * @description
+ * @create 2021-06-01 18:07:21
+ */
+@Service
+@SuppressWarnings("UnstableApiUsage")
+public class SecKillService {
+    private RateLimiter rateLimiter;
+    private LimitService limitService;
+    private StockService stockService;
+    private GoodMapper goodMapper;
+    private OrderMapper orderMapper;
+    private RabbitTemplate rabbitTemplate;
+
+    @Autowired
+    public void setRateLimiter(RateLimiter rateLimiter) {
+        this.rateLimiter = rateLimiter;
+    }
+
+    @Autowired
+    public void setLimitService(LimitService limitService) {
+        this.limitService = limitService;
+    }
+
+    @Autowired
+    public void setStockService(StockService stockService) {
+        this.stockService = stockService;
+    }
+
+    @Autowired
+    public void setGoodMapper(GoodMapper goodMapper) {
+        this.goodMapper = goodMapper;
+    }
+
+    @Autowired
+    public void setOrderMapper(OrderMapper orderMapper) {
+        this.orderMapper = orderMapper;
+    }
+
+    @Autowired
+    public void setRabbitTemplate(RabbitTemplate rabbitTemplate) {
+        this.rabbitTemplate = rabbitTemplate;
+    }
+
+    public ReturnType seckill(String goodId, String phone, String email) {
+        Boolean flag = limitService.checkRepeatLimit(goodId, phone, email);
+        if (!flag) {
+            return ReturnType.TimeLimitError;
+        }
+        Boolean isEnough = stockService.checkStock(goodId);
+        if (!isEnough) {
+            return ReturnType.StockOutError;
+        }
+        if (rateLimiter.tryAcquire()) {
+            QueryWrapper<Good> wrapper = new QueryWrapper<>();
+            wrapper.select("stock").eq("good_id", goodId);
+            Long stock = goodMapper.selectOne(wrapper).getStock();
+            if (stock == null || stock <= 0) {
+                stockService.resetStock(goodId);
+                return ReturnType.StockOutError;
+            }
+            // 判断该用户是否抢购过了
+            QueryWrapper<Order> orderQueryWrapper = new QueryWrapper<>();
+            orderQueryWrapper.eq("phone", phone).eq("good_id", goodId).ne("status", "2");
+            List<Order> orders = orderMapper.selectList(orderQueryWrapper);
+            if (orders.size() != 0) {
+                stockService.incrementStock(goodId);
+                return ReturnType.PurchaseLimitError;
+            }
+
+            // 一切就绪，开始生成订单，默认就是待支付状态，status = 1
+            Order order = new Order();
+            order.setPhone(phone);
+            order.setEmail(email);
+            order.setGoodId(goodId);
+            order.setStatus("1");
+            int insert = orderMapper.insert(order);
+            if (insert > 0) {
+                // 将该订单送入死信队列，等待处理
+                rabbitTemplate.convertAndSend("order-event-exchange", "seckill.order.create", order);
+            } else {
+                stockService.incrementStock(goodId);
+                return ReturnType.SeckillFailError;
+            }
+        } else {
+            stockService.incrementStock(goodId);
+            return ReturnType.SeckillFailError;
+        }
+        return ReturnType.Success;
+    }
+}
+```
+
+## 4.6 controller
+
+这个太复杂了，原谅我是在不想记录，因为踩的坑太多了….记不过来，想了解自己看代码去吧
+
+# 5. 打包
+
+这是个好问题，多模块开发的打包部署，每个子模块和父模块的 pom 文件必须写对，参照我这个项目的 pom 写就行，而且是先打包父项目，然后按照子模块的依赖关系顺序打包，从没有依赖其他同级模块的 pom 开始打包。
+
+
+
+
+
+
 
 
 
